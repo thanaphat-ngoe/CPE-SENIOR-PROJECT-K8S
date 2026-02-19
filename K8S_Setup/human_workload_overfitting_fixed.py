@@ -12,7 +12,7 @@ LOGFILE = "organic_workload.log"
 # --- PARAMETERS เพื่อลด Overfitting ---
 # ช่วงจำนวน Pod ต่ำสุด - สูงสุด
 MIN_REPLICAS = 10
-MAX_REPLICAS = 35 
+MAX_REPLICAS = 40
 
 # ความถี่ในการปรับ (Update Interval)
 # ปรับทุกๆ 30-60 วินาที (เพื่อให้กราฟมีความต่อเนื่อง ไม่นิ่งยาวๆ)

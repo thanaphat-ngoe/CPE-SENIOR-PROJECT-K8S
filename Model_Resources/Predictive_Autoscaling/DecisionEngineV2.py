@@ -17,20 +17,19 @@ class DecisionEngine:
 
         # Thresholds
         self.scale_out_percent = 0.80  # Scale Out when predicting > 80% of current capacity
-        self.scale_in_percent = 0.95   # Scale In when predicting < 60% of capacity (after removing 1 node)
-        self.safe_cpu_percent = 80.0   # Block scale-in if current cluster CPU > 50%
+        self.scale_in_percent = 0.75   # Scale In when predicting < 75% of capacity (after removing 1 node) 
+        self.safe_cpu_percent = 80.0   # Block scale-in if current cluster CPU > 80%
 
-    def decide(self, predicted_cores, current_workers, pending_pods, current_cpu_usage):
+    #  จุดที่ 1: เติม current_cpu_req เข้ามาในวงเล็บ
+    def decide(self, predicted_cores, current_workers, pending_pods, current_cpu_usage, current_cpu_req):
         current_time = time.time()
         current_total_cores = current_workers * self.cores_per_node
         
         intent = "DO_NOTHING"
         reason = "System is stable"
 
-        # ---------------------------------------------------------
         # 1. LOGIC PHASE (ตัดสินใจว่าจะทำอะไร)
-        # ---------------------------------------------------------
-        
+
         # Guardrail 1: Sanity Check
         if predicted_cores < 0 or predicted_cores > (self.max_workers * self.cores_per_node * 2):
             return "DO_NOTHING", f"Sanity Check Failed: Abnormal prediction ({predicted_cores:.2f} cores)"
@@ -45,16 +44,25 @@ class DecisionEngine:
             cores_after_scale_in = (current_workers - 1) * self.cores_per_node
             scale_in_threshold = cores_after_scale_in * self.scale_in_percent
 
+            # ขาขึ้น: เชื่อ AI อย่างเดียว รีบเปิดเครื่องดักไว้เลย
             if predicted_cores > scale_out_threshold:
                 intent = "SCALE_OUT"
                 reason = f"[AI] Need {predicted_cores:.2f} Cores (> {scale_out_threshold:.2f} limit)"
+            
+            # จุดที่ 2: ขาลง (เพิ่ม Asymmetric Logic เช็คโลกความเป็นจริง)
             elif predicted_cores < scale_in_threshold:
-                intent = "SCALE_IN"
-                reason = f"[AI] Need {predicted_cores:.2f} Cores (< {scale_in_threshold:.2f} safe zone for {current_workers-1} nodes)"
+                
+                # ถ้าโลกความจริงปัจจุบัน คิวยังแน่นอยู่ (มากกว่า Threshold ที่จะลดเครื่อง)
+                if current_cpu_req >= scale_in_threshold:
+                    intent = "DO_NOTHING"
+                    reason = f"[Wait] AI Predicts {predicted_cores:.2f}, but Current Req is still high ({current_cpu_req:.2f} >= {scale_in_threshold:.2f})"
+                
+                # ถ้าปลอดภัยทั้ง AI (อนาคต) และ โลกจริง (ปัจจุบัน)
+                else:
+                    intent = "SCALE_IN"
+                    reason = f"[Safe Scale-In] Predict ({predicted_cores:.2f}) & Current ({current_cpu_req:.2f}) are safe for {current_workers-1} nodes"
 
-        # ---------------------------------------------------------
         # 2. EXECUTION PHASE (ตรวจสอบว่าทำได้จริงไหม)
-        # ---------------------------------------------------------
         
         if intent == "SCALE_OUT":
             if current_workers >= self.max_workers:

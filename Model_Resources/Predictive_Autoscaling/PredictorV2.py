@@ -82,13 +82,19 @@ def fetch_realtime_data():
     if worker_cpu_cap > 0:
         current_cpu_percent = (worker_cpu_usage / worker_cpu_cap) * 100
 
+    running_count = 0
+    try:
+        running_cmd = "kubectl get pods -n default --field-selector=status.phase=Running --no-headers | wc -l"
+        running_count = int(run_cmd(running_cmd))
+    except: pass
+
     pending_count = 0
     try:
         pending_cmd = "kubectl get pods -A --field-selector=status.phase=Pending --no-headers | wc -l"
         pending_count = int(run_cmd(pending_cmd))
     except: pass
 
-    return total_cpu_req, active_workers, pending_count, current_cpu_percent
+    return total_cpu_req, active_workers, pending_count, current_cpu_percent, running_count
 
 # ==========================================
 # 📝 2.5 ระบบจัดการ LOG (สร้างไฟล์และหัวตาราง)
@@ -101,6 +107,7 @@ def init_logger():
                 "Timestamp", 
                 "Current_Workers", 
                 "CPU_Usage_Percent", 
+                "Running_Pods",
                 "Pending_Pods", 
                 "Current_Req_Cores", 
                 "Predicted_Req_Cores", 
@@ -142,7 +149,7 @@ while True:
         timestamp_short = current_dt.strftime("%H:%M:%S")
         
         # 1. ดึงข้อมูล
-        cpu_req, current_workers, pending_pods, cpu_usage_pct = fetch_realtime_data()
+        cpu_req, current_workers, pending_pods, cpu_usage_pct, running_pods = fetch_realtime_data()
         
         history_buffer.append([cpu_req])
         if len(history_buffer) > WINDOW_SIZE:
@@ -156,7 +163,7 @@ while True:
 
         # 3. เริ่มวิเคราะห์และแสดงผล Dashboard
         print(f"\n[{timestamp_short}] " + "━"*45)
-        print(f"📊 [K8s Status] Worker Active: {current_workers} | CPU Usage: {cpu_usage_pct:.1f}% | Pending Pods: {pending_pods}")
+        print(f"📊 [K8s Status] Worker Active: {current_workers} | CPU Usage: {cpu_usage_pct:.1f}% |Running Pods: {running_pods} |Pending Pods: {pending_pods}")
 
         # เตรียมข้อมูลเข้า AI
         raw_array = np.array(history_buffer) 
@@ -174,11 +181,12 @@ while True:
             predicted_cores=predicted_cores,
             current_workers=current_workers,
             pending_pods=pending_pods,
-            current_cpu_usage=cpu_usage_pct
+            current_cpu_usage=cpu_usage_pct,
+            current_cpu_req=cpu_req
         )
         
         print(f"🤖 [Decision] : {action}")
-        print(f"     [Reason] : {reason}") # 👈 โชว์ Reason แบบจัดเต็มตรงนี้
+        print(f"     [Reason] : {reason}") 
         
         # 5. บันทึกข้อมูลลง CSV
         try:
@@ -188,6 +196,7 @@ while True:
                     timestamp_full,
                     current_workers,
                     round(cpu_usage_pct, 2),
+                    running_pods,
                     pending_pods,
                     round(cpu_req, 2),
                     round(predicted_cores, 2),
